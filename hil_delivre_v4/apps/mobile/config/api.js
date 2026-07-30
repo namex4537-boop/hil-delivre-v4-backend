@@ -1,29 +1,84 @@
-'use strict';
-
 /**
- * @fileoverview Configuration de l'API pour l'application mobile Hil_Delivre v4.
- *
- * @module config/api
+ * ============================================================
+ * Hil_Delivre v4 — Configuration API Mobile
+ * ============================================================
  */
 
-import Constants from 'expo-constants';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
-/**
- * URL de base de l'API backend.
- * En développement : localhost (via le tunnel Expo ou l'IP locale)
- * En production : URL du serveur de production
- */
-export const API_BASE_URL = Constants.expoConfig?.extra?.apiBaseUrl
-  || __DEV__
-    ? 'http://192.168.1.1:3000' // Remplacer par l'IP locale en dev
-    : 'https://api.hildelivre.bf';
+const API_CONFIG = {
+  BASE_URL: 'https://reimagined-space-robot-54j56xj6p6f4w6g-3000.app.github.dev/api',
+  TIMEOUT: 15000,
+};
 
-/**
- * Timeout par défaut des requêtes (en ms).
- */
-export const REQUEST_TIMEOUT = 15000;
+const defaultHeaders = {
+  'Content-Type': 'application/json',
+  Accept: 'application/json',
+};
 
-/**
- * Version de l'API.
- */
-export const API_VERSION = 'v1';
+async function apiRequest(endpoint, options = {}) {
+  const { method = 'GET', body, headers = {}, requireAuth = true } = options;
+
+  try {
+    const requestHeaders = { ...defaultHeaders, ...headers };
+
+    if (requireAuth) {
+      const token = await AsyncStorage.getItem('access_token');
+      if (token) {
+        requestHeaders['Authorization'] = `Bearer ${token}`;
+      }
+    }
+
+    const fetchOptions = {
+      method,
+      headers: requestHeaders,
+    };
+
+    if (body && method !== 'GET') {
+      fetchOptions.body = JSON.stringify(body);
+    }
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), API_CONFIG.TIMEOUT);
+    fetchOptions.signal = controller.signal;
+
+    const response = await fetch(`${API_CONFIG.BASE_URL}${endpoint}`, fetchOptions);
+    clearTimeout(timeoutId);
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        await AsyncStorage.removeItem('access_token');
+        await AsyncStorage.removeItem('refresh_token');
+      }
+      const error = new Error(data.message || `Erreur ${response.status}`);
+      error.status = response.status;
+      error.data = data;
+      throw error;
+    }
+
+    return data;
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      throw new Error('La requête a expiré. Vérifiez votre connexion internet.');
+    }
+    throw error;
+  }
+}
+
+const api = {
+  get: (endpoint, options = {}) =>
+    apiRequest(endpoint, { ...options, method: 'GET' }),
+  post: (endpoint, body, options = {}) =>
+    apiRequest(endpoint, { ...options, method: 'POST', body }),
+  put: (endpoint, body, options = {}) =>
+    apiRequest(endpoint, { ...options, method: 'PUT', body }),
+  patch: (endpoint, body, options = {}) =>
+    apiRequest(endpoint, { ...options, method: 'PATCH', body }),
+  delete: (endpoint, options = {}) =>
+    apiRequest(endpoint, { ...options, method: 'DELETE' }),
+};
+
+export { API_CONFIG };
+export default api;
